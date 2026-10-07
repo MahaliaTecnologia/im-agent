@@ -16,17 +16,18 @@ import (
 	"github.com/insightmanager/im-agent/internal/telemetry"
 )
 
-const versao = "2.1.0"
+const versao = "2.1.1"
 
 func main() {
 	cloudURL := flag.String("cloud", "", "URL da nuvem (obrigatório)")
 	chave := flag.String("chave", "", "Chave de registro imdev_xxx.yyy")
 	hostID := flag.String("host-id", "", "Identificador do equipamento (ex: maquina.dominio)")
 	mostrarVersao := flag.Bool("versao", false, "Mostra a versão e sai (usado no autoteste da atualização)")
+	mostrarVersaoEn := flag.Bool("version", false, "Igual a --versao (compatibilidade com scripts antigos)")
 	permitirHTTP := flag.Bool("permitir-http", false, "Aceita nuvem sem HTTPS (somente desenvolvimento)")
 	flag.Parse()
 
-	if *mostrarVersao {
+	if *mostrarVersao || *mostrarVersaoEn {
 		fmt.Println(versao)
 		return
 	}
@@ -125,7 +126,7 @@ func main() {
 
 		// Telemetria a cada 10 ciclos (~10 min)
 		if ciclo%10 == 0 {
-			go func() { _ = c.EnviarTelemetria(telemetry.Coletar(*cloudURL)) }()
+			go func() { _ = c.EnviarTelemetria(telemetry.Normalizar(telemetry.Coletar(*cloudURL))) }()
 		}
 		// Inventário e patches a cada 360 ciclos (~6 horas)
 		if ciclo%360 == 0 {

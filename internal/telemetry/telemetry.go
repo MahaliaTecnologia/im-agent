@@ -24,3 +24,11 @@ type App struct {
 	Travamentos int     `json:"travamentos"`
 	MemoriaMb   float64 `json:"memoriaMb,omitempty"`
 }
+
+// Normalizar garante listas vazias em vez de null no JSON enviado à nuvem.
+func Normalizar(t Telemetria) Telemetria {
+	if t.Aplicacoes == nil {
+		t.Aplicacoes = []App{}
+	}
+	return t
+}

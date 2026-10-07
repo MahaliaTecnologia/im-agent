@@ -119,10 +119,11 @@ func (c *Client) Registrar(chave string) (string, error) {
 }
 
 type pollReq struct {
-	Versao   string `json:"versao"`
-	Hostname string `json:"hostname"`
-	Sistema  string `json:"sistema"`
-	Saude    Saude  `json:"saude"`
+	Versao      string `json:"versao"`
+	Hostname    string `json:"hostname"`
+	Sistema     string `json:"sistema"`
+	Arquitetura string `json:"arquitetura"`
+	Saude       Saude  `json:"saude"`
 }
 
 type Payload struct {
@@ -160,10 +161,11 @@ type pollResp struct {
 
 func (c *Client) Poll(saude Saude) (*pollResp, error) {
 	body, _ := json.Marshal(pollReq{
-		Versao:   c.versao,
-		Hostname: c.hostID,
-		Sistema:  c.sistema,
-		Saude:    saude,
+		Versao:      c.versao,
+		Hostname:    c.hostID,
+		Sistema:     c.sistema,
+		Arquitetura: c.arch,
+		Saude:       saude,
 	})
 	req, _ := http.NewRequest("POST", c.baseURL+"/api/public/device-agent/poll", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+c.Token())
