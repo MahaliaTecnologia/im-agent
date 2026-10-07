@@ -94,7 +94,11 @@ func main() {
 	fmt.Printf("Canal direto ativo (%s). Consultando a nuvem periodicamente.\n", *hostID)
 
 	intervalo := 60 * time.Second
-	ciclo := 0
+	// Telemetria e inventário por relógio (não por número de consultas): a
+	// nuvem espaça as consultas quando não há ordens, o que atrasaria a coleta.
+	const cadaTelemetria = 10 * time.Minute
+	const cadaInventario = 6 * time.Hour
+	var ultimaTelemetria, ultimoInventario time.Time
 
 	for {
 		if c.Token() == "" {
@@ -124,18 +128,23 @@ func main() {
 			}
 		}
 
-		// Telemetria a cada 10 ciclos (~10 min)
-		if ciclo%10 == 0 {
+		agora := time.Now()
+		if c.Token() != "" && agora.Sub(ultimaTelemetria) >= cadaTelemetria {
+			ultimaTelemetria = agora
 			go func() { _ = c.EnviarTelemetria(telemetry.Normalizar(telemetry.Coletar(*cloudURL))) }()
 		}
-		// Inventário e patches a cada 360 ciclos (~6 horas)
-		if ciclo%360 == 0 {
+		if c.Token() != "" && agora.Sub(ultimoInventario) >= cadaInventario {
+			ultimoInventario = agora
 			go func() { _ = c.EnviarInventario(inventory.Coletar()) }()
 			go func() { _ = c.EnviarPatches(patches.Listar()) }()
 		}
 
-		ciclo++
-		time.Sleep(intervalo)
+		// Nunca dorme mais que o intervalo da telemetria.
+		espera := intervalo
+		if espera > cadaTelemetria {
+			espera = cadaTelemetria
+		}
+		time.Sleep(espera)
 	}
 }
 
