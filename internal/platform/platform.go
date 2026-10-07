@@ -1,11 +1,7 @@
 package platform
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,63 +57,67 @@ func RemoverPacote(p cloud.Payload) error {
 	return removerPacoteOS(p)
 }
 
-// instalarPacote baixa e instala um arquivo.
+// instalarPacote baixa e instala um arquivo. Exige HTTP 200; com SHA-256
+// informado, confere o hash; sem SHA-256, só aceita HTTPS.
 func instalarPacote(url, sha256sum, comando string) error {
+	if err := cloud.ValidarURLPacote(url, sha256sum != ""); err != nil {
+		return err
+	}
 	tmpDir, err := os.MkdirTemp("", "im-pkg-")
 	if err != nil {
-		tmpDir = filepath.Join(os.TempDir(), fmt.Sprintf("im-pkg-%d", time.Now().UnixNano()))
-		os.MkdirAll(tmpDir, 0700)
+		return fmt.Errorf("não foi possível criar pasta temporária: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Nome do arquivo da URL
 	nome := filepath.Base(strings.Split(url, "?")[0])
-	if nome == "" || nome == "." {
+	if nome == "" || nome == "." || nome == "/" {
 		nome = "pacote"
 	}
 	arq := filepath.Join(tmpDir, nome)
 
-	// Download
-	client := &http.Client{Timeout: 900 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return fmt.Errorf("falha ao baixar o pacote: %w", err)
-	}
-	defer resp.Body.Close()
-	f, err := os.Create(arq)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		return fmt.Errorf("falha ao gravar o pacote: %w", err)
-	}
-	f.Close()
-
-	// Verifica SHA256 se fornecido
-	if sha256sum != "" {
-		calc, err := sha256Arquivo(arq)
-		if err != nil {
-			return err
-		}
-		if !strings.EqualFold(calc, sha256sum) {
+	if err := cloud.Baixar(url, arq, sha256sum); err != nil {
+		if strings.Contains(err.Error(), "SHA-256") {
 			return fmt.Errorf("assinatura do pacote não confere")
 		}
+		return fmt.Errorf("falha ao baixar o pacote: %w", err)
 	}
-
-	// Executa o instalador
 	return executarInstalador(arq, comando)
 }
 
-func sha256Arquivo(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
+// candidatoUnico devolve o único item cujo nome corresponde exatamente a um
+// dos alvos (sem diferenciar maiúsculas). Nenhum ou mais de um = erro: a
+// remoção nunca escolhe "o primeiro parecido".
+func candidatoUnico(nomes []string, alvos []string) (string, error) {
+	vistos := map[string]bool{}
+	var achados []string
+	for _, n := range nomes {
+		nn := strings.ToLower(strings.TrimSpace(n))
+		if nn == "" {
+			continue
+		}
+		for _, a := range alvos {
+			if aa := strings.ToLower(strings.TrimSpace(a)); aa != "" && nn == aa && !vistos[nn] {
+				vistos[nn] = true
+				achados = append(achados, strings.TrimSpace(n))
+			}
+		}
 	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
+	switch len(achados) {
+	case 0:
+		return "", fmt.Errorf("nenhum programa com nome exato encontrado")
+	case 1:
+		return achados[0], nil
+	default:
+		return "", fmt.Errorf("mais de um programa corresponde (%s); informe o comando de remoção", strings.Join(achados, ", "))
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// alvosRemocao junta produto e termos sem alterar o slice recebido.
+func alvosRemocao(p cloud.Payload) []string {
+	out := make([]string, 0, len(p.Termos)+2)
+	out = append(out, p.Termos...)
+	if p.Produto != "" {
+		out = append(out, p.Produto)
+	}
+	return out
 }

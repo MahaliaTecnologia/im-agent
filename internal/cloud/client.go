@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// TamanhoMaximoDownload limita qualquer arquivo baixado (agente ou pacote).
+const TamanhoMaximoDownload = 2 << 30 // 2 GiB
+
 type Client struct {
 	baseURL string
 	versao  string
@@ -22,6 +25,10 @@ type Client struct {
 	token       string
 	falhasNuvem int
 	ultimoErro  string
+
+	// Atualização que falhou: não repetir o mesmo download antes de 1 hora.
+	atualizacaoFalhou   string
+	atualizacaoFalhouEm time.Time
 }
 
 func New(baseURL, versao, hostID, sistema, arch string) *Client {
@@ -119,14 +126,14 @@ type pollReq struct {
 }
 
 type Payload struct {
-	Produto          string   `json:"produto"`
-	Termos           []string `json:"termos"`
-	URL              string   `json:"url"`
-	SHA256           string   `json:"sha256"`
-	Argumentos       string   `json:"argumentos"`
-	ArgumentosRemover string  `json:"argumentosRemover"`
-	Gerenciador      string   `json:"gerenciador"`
-	Versao           string   `json:"versao"`
+	Produto           string   `json:"produto"`
+	Termos            []string `json:"termos"`
+	URL               string   `json:"url"`
+	SHA256            string   `json:"sha256"`
+	Argumentos        string   `json:"argumentos"`
+	ArgumentosRemover string   `json:"argumentosRemover"`
+	Gerenciador       string   `json:"gerenciador"`
+	Versao            string   `json:"versao"`
 }
 
 type Ordem struct {
@@ -135,14 +142,19 @@ type Ordem struct {
 	Payload Payload `json:"payload"`
 }
 
+// AgenteInfo é a instrução de autoatualização enviada pela nuvem no poll.
+// Sem SHA256 a atualização é recusada.
 type AgenteInfo struct {
-	Versao   string `json:"versao"`
-	Atualizar bool  `json:"atualizar"`
+	Versao     string `json:"versao"`
+	Atualizar  bool   `json:"atualizar"`
+	URL        string `json:"url"`        // opcional; padrão /agente-endpoint/im-agent?os=&arch=
+	SHA256     string `json:"sha256"`     // obrigatório para atualizar
+	Assinatura string `json:"assinatura"` // Ed25519 (base64) do SHA-256; obrigatória se o binário tiver chave pública embutida
 }
 
 type pollResp struct {
-	Ordens    []Ordem    `json:"ordens"`
-	Intervalo int        `json:"intervalo"`
+	Ordens    []Ordem     `json:"ordens"`
+	Intervalo int         `json:"intervalo"`
 	Agente    *AgenteInfo `json:"agente"`
 }
 
@@ -225,34 +237,73 @@ func (c *Client) IniciarBatida(tarefa string) chan struct{} {
 	return stop
 }
 
-func (c *Client) Autoatualizar(novaVersao string, args []string) error {
-	ext := ""
-	if os.Getenv("OS") == "Windows_NT" {
-		ext = ".exe"
+// Autoatualizar baixa a nova versão, confere integridade (SHA-256 e, quando
+// configurado, assinatura Ed25519), faz um autoteste e só então troca o
+// executável, guardando o anterior em <executável>.anterior.
+func (c *Client) Autoatualizar(info AgenteInfo, goos, goarch string, args []string) error {
+	if info.Versao != "" && info.Versao == c.versao {
+		return nil // já está nesta versão
+	}
+	chave := info.Versao + "|" + info.SHA256
+	if chave == c.atualizacaoFalhou && time.Since(c.atualizacaoFalhouEm) < time.Hour {
+		return nil // falhou há pouco; espera antes de tentar de novo
+	}
+	err := c.autoatualizar(info, goos, goarch, args)
+	if err != nil {
+		c.atualizacaoFalhou, c.atualizacaoFalhouEm = chave, time.Now()
+	}
+	return err
+}
+
+func (c *Client) autoatualizar(info AgenteInfo, goos, goarch string, args []string) error {
+	if info.SHA256 == "" {
+		return fmt.Errorf("atualização recusada: a nuvem não informou o SHA-256 da versão %s", info.Versao)
+	}
+	if err := VerificarAssinatura(info.SHA256, info.Assinatura); err != nil {
+		return err
+	}
+	url, err := c.urlAtualizacao(info.URL, goos, goarch)
+	if err != nil {
+		return err
 	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	tmp := self + ".novo"
-	if err := download(c.baseURL+"/agente-endpoint/im-agent"+ext, tmp); err != nil {
-		return err
-	}
-	if fi, err := os.Stat(tmp); err != nil || fi.Size() < 1000 {
+	_ = os.Remove(tmp)
+	if err := Baixar(url, tmp, info.SHA256); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("arquivo baixado inválido")
+		return fmt.Errorf("download da atualização: %w", err)
 	}
 	if err := os.Chmod(tmp, 0755); err != nil {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, self); err != nil {
+	if err := autoteste(tmp, info.Versao); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("a nova versão não passou no autoteste: %w", err)
+	}
+	if err := trocarExecutavel(self, tmp); err != nil {
 		os.Remove(tmp)
 		return err
 	}
-	fmt.Printf("Agente atualizado para %s; reiniciando.\n", novaVersao)
-	// Reinicia o processo com os mesmos argumentos
+	fmt.Printf("Agente atualizado para %s; reiniciando.\n", info.Versao)
 	return execRestart(self, args)
+}
+
+// urlAtualizacao aceita só HTTPS e só o mesmo host da nuvem configurada.
+func (c *Client) urlAtualizacao(informada, goos, goarch string) (string, error) {
+	if informada == "" {
+		return fmt.Sprintf("%s/agente-endpoint/im-agent?os=%s&arch=%s", c.baseURL, goos, goarch), nil
+	}
+	if len(informada) > 0 && informada[0] == '/' {
+		return c.baseURL + informada, nil
+	}
+	if !mesmoHost(informada, c.baseURL) {
+		return "", fmt.Errorf("atualização recusada: endereço fora do domínio da nuvem")
+	}
+	return informada, nil
 }
 
 func (c *Client) post(path string, payload interface{}, timeout time.Duration) error {
@@ -277,6 +328,7 @@ func (c *Client) post(path string, payload interface{}, timeout time.Duration) e
 }
 
 type ErrNaoAutorizado struct{}
+
 func (e *ErrNaoAutorizado) Error() string { return "não autorizado" }
 
 func EhNaoAutorizado(err error) bool {
@@ -297,18 +349,55 @@ func SalvarToken(path, token string) {
 	_ = os.WriteFile(path, []byte(token), 0600)
 }
 
-func download(url, dest string) error {
-	client := &http.Client{Timeout: 900 * time.Second}
+// Baixar grava url em dest, exigindo HTTP 200, tamanho máximo e, se
+// sha256esperado não for vazio, conferindo o hash. Redirecionamentos para
+// HTTP simples são recusados.
+func Baixar(url, dest, sha256esperado string) error {
+	client := &http.Client{
+		Timeout: 900 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("redirecionamentos demais")
+			}
+			if req.URL.Scheme != "https" && !PermitirHTTP {
+				return fmt.Errorf("redirecionamento para endereço sem HTTPS recusado")
+			}
+			return nil
+		},
+	}
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	f, err := os.Create(dest)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("o servidor respondeu HTTP %d", resp.StatusCode)
+	}
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0700)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
-	return err
+	n, err := io.Copy(f, io.LimitReader(resp.Body, TamanhoMaximoDownload+1))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if n > TamanhoMaximoDownload {
+		return fmt.Errorf("arquivo maior que o limite permitido")
+	}
+	if n == 0 {
+		return fmt.Errorf("arquivo vazio")
+	}
+	if sha256esperado != "" {
+		calc, err := SHA256Arquivo(dest)
+		if err != nil {
+			return err
+		}
+		if !iguaisHex(calc, sha256esperado) {
+			return fmt.Errorf("SHA-256 não confere")
+		}
+	}
+	return nil
 }

@@ -204,40 +204,50 @@ func removerPacoteOS(p cloud.Payload) error {
 		}
 		return nil
 	}
-	if p.Produto == "" {
+	// Sem comando próprio: só remove pacote cujo nome seja EXATAMENTE o do
+	// gerenciador, do produto ou de um termo, e só se houver um único.
+	alvos := alvosRemocao(p)
+	if p.Gerenciador != "" {
+		alvos = append(alvos, p.Gerenciador)
+	}
+	if len(alvos) == 0 {
 		return fmt.Errorf("sem nome do produto")
 	}
-	nome := strings.Fields(p.Produto)[0]
-	// apt-get
-	if _, err := exec.LookPath("apt-get"); err == nil {
-		// Tenta encontrar o pacote pelo nome parcial
-		out, _ := exec.Command("dpkg-query", "-W", "-f=${Package}\n").Output()
-		for _, pkg := range strings.Split(string(out), "\n") {
-			if strings.Contains(strings.ToLower(pkg), strings.ToLower(nome[:min(len(nome), 12)])) {
-				if exec.Command("apt-get", "-y", "remove", strings.TrimSpace(pkg)).Run() == nil {
-					return nil
-				}
+	if _, err := exec.LookPath("dpkg-query"); err == nil {
+		out, _ := exec.Command("dpkg-query", "-W", "-f=${Package} ${Status}\n").Output()
+		var pkgs []string
+		for _, l := range strings.Split(string(out), "\n") {
+			if strings.Contains(l, "install ok installed") {
+				pkgs = append(pkgs, strings.Fields(l)[0])
 			}
 		}
-	}
-	// yum/dnf
-	if _, err := exec.LookPath("dnf"); err == nil {
-		if exec.Command("dnf", "-y", "remove", p.Produto).Run() == nil {
+		if alvo, err := candidatoUnico(pkgs, alvos); err == nil {
+			cmd := exec.Command("apt-get", "-y", "remove", alvo)
+			cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("a remoção retornou erro: %s", truncar(string(out), 160))
+			}
 			return nil
+		} else if strings.HasPrefix(err.Error(), "mais de um") {
+			return err
 		}
 	}
-	if _, err := exec.LookPath("yum"); err == nil {
-		if exec.Command("yum", "-y", "remove", p.Produto).Run() == nil {
-			return nil
+	if _, err := exec.LookPath("rpm"); err == nil {
+		out, _ := exec.Command("rpm", "-qa", "--qf", "%{NAME}\n").Output()
+		if alvo, err := candidatoUnico(strings.Split(string(out), "\n"), alvos); err == nil {
+			for _, ger := range []string{"dnf", "yum"} {
+				if _, e := exec.LookPath(ger); e == nil {
+					if exec.Command(ger, "-y", "remove", alvo).Run() == nil {
+						return nil
+					}
+				}
+			}
+			return fmt.Errorf("o gerenciador do sistema não conseguiu remover '%s'", alvo)
+		} else if strings.HasPrefix(err.Error(), "mais de um") {
+			return err
 		}
 	}
-	// Gerenciador nativo
-	if p.Gerenciador != "" {
-		if exec.Command("apt-get", "-y", "remove", p.Gerenciador).Run() == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("programa não encontrado no equipamento (%s)", p.Produto)
+	return fmt.Errorf("programa não encontrado com nome exato (%s); cadastre o comando de remoção ou o nome no gerenciador", p.Produto)
 }
 
 func Reiniciar() {
@@ -279,11 +289,4 @@ func truncar(s string, n int) string {
 		return s[:n]
 	}
 	return s
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

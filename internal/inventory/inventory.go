@@ -7,35 +7,35 @@ type Inventario struct {
 }
 
 type Hardware struct {
-	Fabricante  interface{} `json:"fabricante"`
-	Modelo      interface{} `json:"modelo"`
-	Serie       interface{} `json:"serie"`
-	Processador interface{} `json:"processador"`
-	CPUNucleos  interface{} `json:"cpuNucleos"`
-	MemoriaMb   interface{} `json:"memoriaMb"`
+	Fabricante   interface{} `json:"fabricante"`
+	Modelo       interface{} `json:"modelo"`
+	Serie        interface{} `json:"serie"`
+	Processador  interface{} `json:"processador"`
+	CPUNucleos   interface{} `json:"cpuNucleos"`
+	MemoriaMb    interface{} `json:"memoriaMb"`
 	DiscoTotalGb interface{} `json:"discoTotalGb"`
-	BiosData    interface{} `json:"biosData"`
-	Sistema     string      `json:"sistema"`
-	GPU         interface{} `json:"gpu"`
-	TPM         interface{} `json:"tpm"`
-	Discos      []Disco     `json:"discos"`
-	MemoriaSlots []Slot     `json:"memoriaSlots"`
-	Rede        []Iface     `json:"rede"`
-	Bateria     interface{} `json:"bateria"`
-	Monitores   []Monitor   `json:"monitores"`
+	BiosData     interface{} `json:"biosData"`
+	Sistema      string      `json:"sistema"`
+	GPU          interface{} `json:"gpu"`
+	TPM          interface{} `json:"tpm"`
+	Discos       []Disco     `json:"discos"`
+	MemoriaSlots []Slot      `json:"memoriaSlots"`
+	Rede         []Iface     `json:"rede"`
+	Bateria      interface{} `json:"bateria"`
+	Monitores    []Monitor   `json:"monitores"`
 }
 
 type Disco struct {
-	Nome      string  `json:"nome"`
-	TamanhoGb float64 `json:"tamanhoGb"`
-	LivreGb   float64 `json:"livreGb"`
+	Nome      string      `json:"nome"`
+	TamanhoGb float64     `json:"tamanhoGb"`
+	LivreGb   float64     `json:"livreGb"`
 	Tipo      interface{} `json:"tipo"`
 }
 
 type Slot struct {
-	Slot      string  `json:"slot"`
-	TamanhoMb int     `json:"tamanhoMb"`
-	Tipo      interface{} `json:"tipo"`
+	Slot       string      `json:"slot"`
+	TamanhoMb  int         `json:"tamanhoMb"`
+	Tipo       interface{} `json:"tipo"`
 	Velocidade interface{} `json:"velocidade"`
 }
 

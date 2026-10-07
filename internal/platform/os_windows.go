@@ -171,48 +171,49 @@ func removerPacoteOS(p cloud.Payload) error {
 		return nil
 	}
 
-	alvos := append(p.Termos, p.Produto)
+	// Sem comando próprio: só remove o programa cujo nome exibido seja
+	// EXATAMENTE o produto ou um termo, e só se houver um único.
 	instalados := listarInstalados()
-	for _, alvo := range alvos {
-		for _, prog := range instalados {
-			if !strings.Contains(strings.ToLower(prog["nome"]), strings.ToLower(alvo)) {
-				continue
+	var nomes []string
+	for _, prog := range instalados {
+		nomes = append(nomes, prog["nome"])
+	}
+	alvo, err := candidatoUnico(nomes, alvosRemocao(p))
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "mais de um") {
+			return err
+		}
+		// Winget por identificador exato como último recurso.
+		if p.Gerenciador != "" && temWinget() {
+			cmd := exec.Command("winget.exe", "uninstall", "--id", p.Gerenciador,
+				"--exact", "--silent", "--disable-interactivity")
+			if cmd.Run() == nil {
+				return nil
 			}
-			// Tenta pelo GUID MSI
-			if strings.HasPrefix(prog["key"], "{") {
-				cmd := exec.Command("msiexec.exe", "/x", prog["key"], "/qn", "/norestart")
-				if cmd.Run() == nil {
-					return nil
-				}
+		}
+		return fmt.Errorf("programa não encontrado com nome exato (%s); cadastre o comando de remoção", p.Produto)
+	}
+	for _, prog := range instalados {
+		if !strings.EqualFold(strings.TrimSpace(prog["nome"]), alvo) {
+			continue
+		}
+		if strings.HasPrefix(prog["key"], "{") {
+			if exec.Command("msiexec.exe", "/x", prog["key"], "/qn", "/norestart").Run() == nil {
+				return nil
 			}
-			// QuietUninstallString
-			if prog["quietUninstall"] != "" {
-				cmd := exec.Command("cmd.exe", "/d", "/s", "/c", prog["quietUninstall"])
-				if cmd.Run() == nil {
-					return nil
-				}
+		}
+		if prog["quietUninstall"] != "" {
+			if exec.Command("cmd.exe", "/d", "/s", "/c", prog["quietUninstall"]).Run() == nil {
+				return nil
 			}
-			// UninstallString
-			if prog["uninstall"] != "" {
-				cmd := exec.Command("cmd.exe", "/d", "/s", "/c",
-					prog["uninstall"]+" /S /silent /qn /norestart")
-				if cmd.Run() == nil {
-					return nil
-				}
+		}
+		if prog["uninstall"] != "" {
+			if exec.Command("cmd.exe", "/d", "/s", "/c", prog["uninstall"]+" /S /silent /qn /norestart").Run() == nil {
+				return nil
 			}
 		}
 	}
-
-	// Winget como último recurso
-	if p.Gerenciador != "" && temWinget() {
-		cmd := exec.Command("winget.exe", "uninstall", "--id", p.Gerenciador,
-			"--exact", "--silent", "--disable-interactivity")
-		if cmd.Run() == nil {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("programa não encontrado no equipamento (procurei por: %s)", strings.Join(alvos, ", "))
+	return fmt.Errorf("o desinstalador de '%s' retornou erro", alvo)
 }
 
 func Reiniciar() {

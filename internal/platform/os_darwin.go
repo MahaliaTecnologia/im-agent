@@ -188,15 +188,19 @@ func removerPacoteOS(p cloud.Payload) error {
 		return nil
 	}
 
-	// Procura em /Applications
-	alvos := append(p.Termos, p.Produto)
-	for _, alvo := range alvos {
-		apps, _ := filepath.Glob("/Applications/*" + alvo + "*.app")
-		if len(apps) > 0 {
-			if err := os.RemoveAll(apps[0]); err == nil {
-				return nil
-			}
+	// Procura em /Applications pelo nome EXATO do app (Produto.app); nunca
+	// por trecho do nome.
+	apps, _ := filepath.Glob("/Applications/*.app")
+	var nomes []string
+	for _, a := range apps {
+		nomes = append(nomes, strings.TrimSuffix(filepath.Base(a), ".app"))
+	}
+	if alvo, err := candidatoUnico(nomes, alvosRemocao(p)); err == nil {
+		if err := os.RemoveAll(filepath.Join("/Applications", alvo+".app")); err == nil {
+			return nil
 		}
+	} else if strings.HasPrefix(err.Error(), "mais de um") {
+		return err
 	}
 
 	// Brew

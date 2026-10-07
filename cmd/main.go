@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/insightmanager/im-agent/internal/cloud"
@@ -15,18 +16,32 @@ import (
 	"github.com/insightmanager/im-agent/internal/telemetry"
 )
 
-const versao = "2.0.0"
+const versao = "2.1.0"
 
 func main() {
 	cloudURL := flag.String("cloud", "", "URL da nuvem (obrigatório)")
 	chave := flag.String("chave", "", "Chave de registro imdev_xxx.yyy")
 	hostID := flag.String("host-id", "", "Identificador do equipamento (ex: maquina.dominio)")
+	mostrarVersao := flag.Bool("versao", false, "Mostra a versão e sai (usado no autoteste da atualização)")
+	permitirHTTP := flag.Bool("permitir-http", false, "Aceita nuvem sem HTTPS (somente desenvolvimento)")
 	flag.Parse()
+
+	if *mostrarVersao {
+		fmt.Println(versao)
+		return
+	}
 
 	if *cloudURL == "" {
 		fmt.Fprintln(os.Stderr, "Informe --cloud")
 		os.Exit(2)
 	}
+	cloud.PermitirHTTP = *permitirHTTP
+	urlNuvem, err := cloud.ValidarURLNuvem(*cloudURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	*cloudURL = urlNuvem
 
 	if *hostID == "" {
 		h, err := platform.HostnameFQDN()
@@ -44,18 +59,36 @@ func main() {
 
 	c := cloud.New(*cloudURL, versao, *hostID, platform.Sistema(), platform.Arch())
 
-	// Carrega ou obtém token
-	token := cloud.LerToken(tokenPath)
-	if token == "" {
-		var err error
-		token, err = c.Registrar(*chave)
-		if err != nil {
-			log.Printf("Registro inicial falhou: %v; tentando novamente no laço.", err)
-		} else {
-			cloud.SalvarToken(tokenPath, token)
+	// Registro com espera progressiva: 1, 2, 4… até 30 minutos entre
+	// tentativas recusadas (por exemplo, cota de ativos esgotada).
+	var proximoRegistro time.Time
+	falhasRegistro := 0
+	registrar := func() {
+		if time.Now().Before(proximoRegistro) {
+			return
 		}
+		tok, err := c.Registrar(*chave)
+		if err != nil {
+			falhasRegistro++
+			espera := time.Minute << uint(min(falhasRegistro-1, 5))
+			if espera > 30*time.Minute {
+				espera = 30 * time.Minute
+			}
+			proximoRegistro = time.Now().Add(espera)
+			log.Printf("Registro falhou: %v; nova tentativa em %s.", err, espera)
+			return
+		}
+		falhasRegistro = 0
+		proximoRegistro = time.Time{}
+		cloud.SalvarToken(tokenPath, tok)
+		c.SetToken(tok)
 	}
-	c.SetToken(token)
+
+	// Carrega ou obtém token
+	c.SetToken(cloud.LerToken(tokenPath))
+	if c.Token() == "" {
+		registrar()
+	}
 
 	fmt.Printf("Canal direto ativo (%s). Consultando a nuvem periodicamente.\n", *hostID)
 
@@ -64,11 +97,7 @@ func main() {
 
 	for {
 		if c.Token() == "" {
-			tok, err := c.Registrar(*chave)
-			if err == nil {
-				cloud.SalvarToken(tokenPath, tok)
-				c.SetToken(tok)
-			}
+			registrar()
 		}
 
 		if c.Token() != "" {
@@ -76,11 +105,7 @@ func main() {
 			if err != nil {
 				c.RegistrarFalha(err.Error())
 				if cloud.EhNaoAutorizado(err) && *chave != "" {
-					tok, rerr := c.Registrar(*chave)
-					if rerr == nil {
-						cloud.SalvarToken(tokenPath, tok)
-						c.SetToken(tok)
-					}
+					registrar()
 				}
 			} else {
 				c.LimparFalhas()
@@ -91,7 +116,7 @@ func main() {
 					go executar(c, ordem)
 				}
 				if resp.Agente != nil && resp.Agente.Atualizar {
-					if err := c.Autoatualizar(resp.Agente.Versao, os.Args); err != nil {
+					if err := c.Autoatualizar(*resp.Agente, runtime.GOOS, runtime.GOARCH, os.Args); err != nil {
 						log.Printf("Autoatualização falhou: %v", err)
 					}
 				}
