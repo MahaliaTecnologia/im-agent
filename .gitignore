@@ -1,0 +1,4 @@
+dist/
+*.exe
+/im-agent
+.DS_Store

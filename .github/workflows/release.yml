@@ -1,0 +1,64 @@
+name: build-e-release
+
+# Testes em todo push/PR. Release (6 binários + manifesto.json + SHA256SUMS)
+# quando uma tag "v*" é enviada, ex.: git tag v2.1.2 && git push origin v2.1.2
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Mesma versão usada nos binários publicados (compilação reproduzível).
+          go-version: "1.24.7"
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Compila todos os sistemas
+        run: ./build.sh
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: testes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.7"
+      - name: Confere tag x versão do código
+        run: |
+          v=$(sed -n 's/^const versao = "\(.*\)"/\1/p' cmd/main.go)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Tag ${GITHUB_REF_NAME} diferente da versão $v em cmd/main.go"; exit 1; }
+      - name: Compila
+        run: ./build.sh
+
+      # --- Assinatura de código (ligar quando as contas existirem) ---------
+      # Windows (Azure Trusted Signing): segredos AZURE_TENANT_ID, AZURE_CLIENT_ID,
+      #   AZURE_CLIENT_SECRET, TS_ENDPOINT, TS_ACCOUNT, TS_PROFILE. Rodar num job
+      #   windows-latest com azure/trusted-signing-action sobre dist/*.exe.
+      # macOS (Developer ID + notarização): segredos MACOS_CERT_P12, MACOS_CERT_SENHA,
+      #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SENHA. Rodar num job macos-latest:
+      #   codesign --options runtime --timestamp -s "Developer ID Application: ..." e
+      #   xcrun notarytool submit --wait (binários soltos são notarizados dentro de um .zip).
+      # Depois de assinar, rodar de novo o cálculo de SHA-256 (o manifesto tem que
+      # refletir o binário assinado). Nunca colocar certificados ou senhas no repositório.
+
+      - name: Publica release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "im-agent ${GITHUB_REF_NAME}" \
+            --notes "Binários, manifesto.json e SHA256SUMS. Copiar para public/agente-endpoint/ do InsightManager depois de conferir os SHA-256."
