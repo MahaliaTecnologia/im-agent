@@ -20,6 +20,7 @@ type Client struct {
 	hostID  string
 	sistema string
 	arch    string
+	serie   string
 
 	mu          sync.RWMutex
 	token       string
@@ -81,7 +82,12 @@ type enrollReq struct {
 	Sistema     string `json:"sistema"`
 	Arquitetura string `json:"arquitetura"`
 	Versao      string `json:"versao"`
+	Serie       string `json:"serie,omitempty"`
 }
+
+// SetSerie informa o número de série enviado no registro (evita duplicar o
+// mesmo equipamento quando o nome muda).
+func (c *Client) SetSerie(s string) { c.serie = s }
 
 type enrollResp struct {
 	Token string `json:"token"`
@@ -97,6 +103,7 @@ func (c *Client) Registrar(chave string) (string, error) {
 		Sistema:     c.sistema,
 		Arquitetura: c.arch,
 		Versao:      c.versao,
+		Serie:       c.serie,
 	})
 	req, _ := http.NewRequest("POST", c.baseURL+"/api/public/device-agent/enroll", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+chave)

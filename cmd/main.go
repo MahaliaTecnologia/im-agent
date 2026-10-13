@@ -16,7 +16,7 @@ import (
 	"github.com/insightmanager/im-agent/internal/telemetry"
 )
 
-const versao = "2.1.1"
+const versao = "2.1.2"
 
 func main() {
 	cloudURL := flag.String("cloud", "", "URL da nuvem (obrigatório)")
@@ -59,6 +59,7 @@ func main() {
 	tokenPath := dataDir + "/canal.token"
 
 	c := cloud.New(*cloudURL, versao, *hostID, platform.Sistema(), platform.Arch())
+	c.SetSerie(inventory.NumeroSerie())
 
 	// Registro com espera progressiva: 1, 2, 4… até 30 minutos entre
 	// tentativas recusadas (por exemplo, cota de ativos esgotada).
