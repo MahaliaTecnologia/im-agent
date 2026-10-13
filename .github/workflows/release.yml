@@ -14,13 +14,15 @@ permissions:
 
 jobs:
   testes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           # Mesma versão usada nos binários publicados (compilação reproduzível).
           go-version: "1.24.7"
+      - name: Confere dependências (go.sum)
+        run: go mod verify
       - run: go vet ./...
       - run: go test ./...
       - name: Compila todos os sistemas
@@ -29,12 +31,12 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: testes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24.7"
       - name: Confere tag x versão do código
