@@ -28,11 +28,12 @@ A compilação é reproduzível (`-trimpath -buildvcs=false`, Go 1.24.7): a mesm
 
 1. Alterar `const versao` em `cmd/main.go` e fazer o commit.
 2. `git tag vX.Y.Z && git push origin main vX.Y.Z`
-3. O GitHub Actions testa, compila e cria a release com os binários, `manifesto.json` e `SHA256SUMS`.
-4. Copiar os arquivos da release para `public/agente-endpoint/` do projeto InsightManager no Lovable e conferir os SHA-256 contra o manifesto. Os agentes 2.1.0+ se atualizam sozinhos.
+3. O GitHub Actions testa, compila, cria a release com os binários, `manifesto.json` e `SHA256SUMS` e envia tudo ao InsightManager (`scripts/publicar-insightmanager.sh`, segredo `IM_RELEASE_TOKEN`).
+4. No InsightManager a versão entra em **piloto**: só os equipamentos marcados como "Piloto de atualização" recebem. Depois de 24 h, se todos os pilotos estiverem na versão nova, com contato recente e sem erro, ela é liberada para todos (verificação de hora em hora).
+5. Tela "Versões do agente" (superadmin): Liberar agora, Pausar, Retomar e Voltar para uma versão anterior. Nada manual no caminho normal.
 
 ## Regras
 
 - Nunca subir binários, chaves privadas, certificados ou senhas para o repositório (`dist/` está no `.gitignore`).
 - `--cloud` exige HTTPS; `--permitir-http` só em desenvolvimento.
-- Assinatura de código (Windows Authenticode / macOS Developer ID + notarização): passos comentados em `.github/workflows/release.yml`, a ligar quando as contas existirem.
+- Assinatura de código: Windows não será assinado (decisão de 13/10); macOS (Developer ID + notarização) a ligar quando a conta Apple for aprovada — passos comentados em `.github/workflows/release.yml`.

@@ -63,4 +63,12 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --title "im-agent ${GITHUB_REF_NAME}" \
-            --notes "Binários, manifesto.json e SHA256SUMS. Copiar para public/agente-endpoint/ do InsightManager depois de conferir os SHA-256."
+            --notes "Binários, manifesto.json e SHA256SUMS. Enviada automaticamente ao InsightManager (piloto 24 h, depois liberada para todos)."
+
+      # Envia ao InsightManager: entra em piloto e é liberada para todos em
+      # 24 h se os pilotos atualizarem sem erro. Pausar/voltar versão na tela
+      # "Versões do agente" do InsightManager (superadmin).
+      - name: Envia ao InsightManager
+        env:
+          IM_RELEASE_TOKEN: ${{ secrets.IM_RELEASE_TOKEN }}
+        run: ./scripts/publicar-insightmanager.sh
