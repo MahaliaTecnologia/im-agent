@@ -61,6 +61,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Rodar de novo (Re-run) não falha: se a release já existe, só
+          # substitui os arquivos (o manifesto continua batendo com os binários).
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --title "im-agent ${GITHUB_REF_NAME}" \
             --notes "Binários, manifesto.json e SHA256SUMS. Enviada automaticamente ao InsightManager (piloto 24 h, depois liberada para todos)."
