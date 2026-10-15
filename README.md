@@ -26,9 +26,9 @@ A compilação é reproduzível (`-trimpath -buildvcs=false`, Go 1.24.7): a mesm
 
 ## Publicar uma versão
 
-1. Alterar `const versao` em `cmd/main.go` e fazer o commit.
-2. `git tag vX.Y.Z && git push origin main vX.Y.Z`
-3. O GitHub Actions testa, compila, cria a release com os binários, `manifesto.json` e `SHA256SUMS` e envia tudo ao InsightManager (`scripts/publicar-insightmanager.sh`, segredo `IM_RELEASE_TOKEN`).
+1. Abrir um PR que altera `const versao` em `cmd/main.go`.
+2. Mesclar o PR na `main`. Não criar tag à mão: o merge é o que publica.
+3. O GitHub Actions testa, compila, cria a tag `vX.Y.Z` e a release com os binários, `manifesto.json` e `SHA256SUMS` e envia tudo ao InsightManager (`scripts/publicar-insightmanager.sh`, segredo `IM_RELEASE_TOKEN`). Um push na `main` que não muda a versão só roda os testes.
 4. No InsightManager a versão entra em **piloto**: só os equipamentos marcados como "Piloto de atualização" recebem. Depois de 24 h, se todos os pilotos estiverem na versão nova, com contato recente e sem erro, ela é liberada para todos (verificação de hora em hora).
 5. Tela "Versões do agente" (superadmin): Liberar agora, Pausar, Retomar e Voltar para uma versão anterior. Nada manual no caminho normal.
 
