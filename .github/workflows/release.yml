@@ -1,11 +1,11 @@
 name: build-e-release
 
 # Testes em todo push/PR. Release (6 binários + manifesto.json + SHA256SUMS)
-# quando uma tag "v*" é enviada, ex.: git tag v2.1.2 && git push origin v2.1.2
+# automática quando chega na main um commit com uma versão nova em cmd/main.go:
+# o próprio workflow cria a tag vX.Y.Z junto com a release. Não criar tags à mão.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -28,21 +28,51 @@ jobs:
       - name: Compila todos os sistemas
         run: ./build.sh
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: testes
+  # Decide se este push na main publica uma versão: só quando a tag vX.Y.Z
+  # ainda não existe. Se ela já existe neste mesmo commit e o job está sendo
+  # rodado de novo (Re-run), publica outra vez para completar um envio que falhou.
+  versao:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      publicar: ${{ steps.decide.outputs.publicar }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: decide
+        run: |
+          v=$(sed -n 's/^const versao = "\(.*\)"/\1/p' cmd/main.go)
+          [ -n "$v" ] || { echo "const versao não encontrada em cmd/main.go"; exit 1; }
+          tag="v$v"
+          git fetch -q --tags origin
+          commit_da_tag=$(git rev-parse -q --verify "refs/tags/${tag}^{commit}" || true)
+          if [ -z "$commit_da_tag" ]; then
+            publicar=true; echo "Versão nova ${tag}: será publicada."
+          elif [ "$commit_da_tag" = "$GITHUB_SHA" ] && [ "$GITHUB_RUN_ATTEMPT" -gt 1 ]; then
+            publicar=true; echo "Re-run de ${tag}: publica de novo."
+          else
+            publicar=false; echo "${tag} já publicada; nada a fazer."
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publicar=$publicar" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: [testes, versao]
+    if: needs.versao.outputs.publicar == 'true'
+    runs-on: ubuntu-24.04
+    # Dois merges seguidos não publicam ao mesmo tempo.
+    concurrency:
+      group: release
+      cancel-in-progress: false
     permissions:
       contents: write
+    env:
+      TAG: ${{ needs.versao.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version: "1.24.7"
-      - name: Confere tag x versão do código
-        run: |
-          v=$(sed -n 's/^const versao = "\(.*\)"/\1/p' cmd/main.go)
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Tag ${GITHUB_REF_NAME} diferente da versão $v em cmd/main.go"; exit 1; }
       - name: Compila
         run: ./build.sh
 
@@ -63,12 +93,13 @@ jobs:
         run: |
           # Rodar de novo (Re-run) não falha: se a release já existe, só
           # substitui os arquivos (o manifesto continua batendo com os binários).
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/* --clobber
             exit 0
           fi
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --title "im-agent ${GITHUB_REF_NAME}" \
+          # --target cria a tag neste commit (não existe tag manual).
+          gh release create "${TAG}" dist/* --target "${GITHUB_SHA}" \
+            --title "im-agent ${TAG}" \
             --notes "Binários, manifesto.json e SHA256SUMS. Enviada automaticamente ao InsightManager (piloto 24 h, depois liberada para todos)."
 
       # Envia ao InsightManager: entra em piloto e é liberada para todos em
