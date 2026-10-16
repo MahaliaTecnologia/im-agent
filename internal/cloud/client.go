@@ -160,10 +160,18 @@ type AgenteInfo struct {
 	Assinatura string `json:"assinatura"` // Ed25519 (base64) do SHA-256; obrigatória se o binário tiver chave pública embutida
 }
 
+// LocalizacaoCfg vem da nuvem: só coleta quando a organização ligou a
+// localização dos computadores (desligada por padrão).
+type LocalizacaoCfg struct {
+	Ativa        bool `json:"ativa"`
+	IntervaloMin int  `json:"intervaloMin"`
+}
+
 type pollResp struct {
-	Ordens    []Ordem     `json:"ordens"`
-	Intervalo int         `json:"intervalo"`
-	Agente    *AgenteInfo `json:"agente"`
+	Ordens      []Ordem         `json:"ordens"`
+	Intervalo   int             `json:"intervalo"`
+	Agente      *AgenteInfo     `json:"agente"`
+	Localizacao *LocalizacaoCfg `json:"localizacao"`
 }
 
 func (c *Client) Poll(saude Saude) (*pollResp, error) {
@@ -220,6 +228,10 @@ func (c *Client) EnviarInventario(inv interface{}) error {
 
 func (c *Client) EnviarPatches(pt interface{}) error {
 	return c.post("/api/public/device-agent/patches", pt, 180*time.Second)
+}
+
+func (c *Client) EnviarLocalizacao(pos interface{}) error {
+	return c.post("/api/public/device-agent/location", pos, 30*time.Second)
 }
 
 func (c *Client) EnviarTelemetria(tel interface{}) error {
