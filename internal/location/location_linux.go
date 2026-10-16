@@ -26,7 +26,7 @@ func coletarOS() Posicao {
 		}
 	}
 	if bin == "" {
-		return Posicao{Status: StatusNaoSuportado, Fonte: "geoclue", Detalhe: "GeoClue não instalado"}
+		return Posicao{Status: StatusIndisponivel, Fonte: "geoclue", Detalhe: "GeoClue não instalado"}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()

@@ -18,7 +18,7 @@ import (
 	"github.com/insightmanager/im-agent/internal/telemetry"
 )
 
-const versao = "2.1.5"
+const versao = "2.1.6"
 
 func main() {
 	cloudURL := flag.String("cloud", "", "URL da nuvem (obrigatório)")
