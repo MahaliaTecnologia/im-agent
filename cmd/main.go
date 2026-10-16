@@ -6,17 +6,19 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/insightmanager/im-agent/internal/cloud"
 	"github.com/insightmanager/im-agent/internal/health"
 	"github.com/insightmanager/im-agent/internal/inventory"
+	"github.com/insightmanager/im-agent/internal/location"
 	"github.com/insightmanager/im-agent/internal/patches"
 	"github.com/insightmanager/im-agent/internal/platform"
 	"github.com/insightmanager/im-agent/internal/telemetry"
 )
 
-const versao = "2.1.4"
+const versao = "2.1.5"
 
 func main() {
 	cloudURL := flag.String("cloud", "", "URL da nuvem (obrigatório)")
@@ -99,7 +101,9 @@ func main() {
 	// nuvem espaça as consultas quando não há ordens, o que atrasaria a coleta.
 	const cadaTelemetria = 10 * time.Minute
 	const cadaInventario = 6 * time.Hour
-	var ultimaTelemetria, ultimoInventario time.Time
+	var ultimaTelemetria, ultimoInventario, ultimaLocalizacao time.Time
+	var cfgLocalizacao cloud.LocalizacaoCfg
+	var coletandoLocalizacao atomic.Bool
 
 	for {
 		if c.Token() == "" {
@@ -121,6 +125,11 @@ func main() {
 				for _, ordem := range resp.Ordens {
 					go executar(c, ordem)
 				}
+				if resp.Localizacao != nil {
+					cfgLocalizacao = *resp.Localizacao
+				} else {
+					cfgLocalizacao = cloud.LocalizacaoCfg{}
+				}
 				if resp.Agente != nil && resp.Agente.Atualizar {
 					if err := c.Autoatualizar(*resp.Agente, runtime.GOOS, runtime.GOARCH, os.Args); err != nil {
 						log.Printf("Autoatualização falhou: %v", err)
@@ -140,6 +149,18 @@ func main() {
 			go func() { _ = c.EnviarPatches(patches.Listar()) }()
 		}
 
+		// Localização só quando a nuvem pede (organização ligou para computadores).
+		if c.Token() != "" && cfgLocalizacao.Ativa && agora.Sub(ultimaLocalizacao) >= intervaloLocalizacao(cfgLocalizacao.IntervaloMin) &&
+			coletandoLocalizacao.CompareAndSwap(false, true) {
+			ultimaLocalizacao = agora
+			go func() {
+				defer coletandoLocalizacao.Store(false)
+				if err := c.EnviarLocalizacao(location.Coletar()); err != nil {
+					log.Printf("Envio da localização falhou: %v", err)
+				}
+			}()
+		}
+
 		// Nunca dorme mais que o intervalo da telemetria.
 		espera := intervalo
 		if espera > cadaTelemetria {
@@ -147,6 +168,19 @@ func main() {
 		}
 		time.Sleep(espera)
 	}
+}
+
+// intervaloLocalizacao limita o pedido da nuvem a 5 min..4 h (padrão 15 min).
+func intervaloLocalizacao(min int) time.Duration {
+	switch {
+	case min <= 0:
+		min = 15
+	case min < 5:
+		min = 5
+	case min > 240:
+		min = 240
+	}
+	return time.Duration(min) * time.Minute
 }
 
 func executar(c *cloud.Client, ordem cloud.Ordem) {
